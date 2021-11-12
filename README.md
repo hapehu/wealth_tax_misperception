@@ -8,7 +8,7 @@ Chirvi, M., Huber, H.-P., Schneider, C. "Biased Preferences for Wealth Taxation:
 
 ### Data
 
-The file "Data" contains both the results of our survey experiment CHS_data.rds and a description of the data CHS_codebook.pdf. 
+The foldder "Data" contains both the results of our survey experiment CHS_data.rds and a description of the data CHS_codebook.pdf. 
 
 The survey experiment was conducted via the online-access panel *respondi* between December, 2020 and January, 2021. Variables are partially aggregated over questions to meet all data protection restrictions.
 
@@ -16,8 +16,8 @@ We additionally used the 2018 wave of the General Social Survey in Germany (ALLB
 
 ### Code
 
-The file "Data" contains the R code CHS_analysis.rmd. This code provides all analysis, figures, regression tables included in our paper.
+The folder "Data" contains the R code CHS_analysis.rmd. This code provides all analysis, figures, regression tables included in our paper.
 
 ## Licence
 
-Code and data ist provide under the MIT Licence.
+Code and data is provided under the MIT Licence.
