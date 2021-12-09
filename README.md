@@ -18,7 +18,7 @@ We additionally used the 2018 wave of the General Social Survey in Germany (ALLB
 
 The folder "Data" contains the R code CHS_analysis.rmd. This code provides all analysis, figures, regression tables included in our paper.
 
-## Funding
+### Funding
 Funding by the Deutsche Forschungsgemeinschaft (DFG, German Research Foundation) Collaborative Research Center (SFB/TRR) Project-ID 403041268 TRR 266 Accounting for Transparency is gratefully acknowledged.
 
 ## Licence
