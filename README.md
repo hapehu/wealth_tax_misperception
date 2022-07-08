@@ -8,7 +8,7 @@ Chirvi, M., Huber, H.-P., Schneider, C. "(Mathematical) Complexity and Preferenc
 
 ### Data
 
-The foldder "Data" contains a description of the data CHS_codebook.pdf, the results of our survey experiment CHS_data.rds and the classified topics CHS_topics.xlsx. 
+The folder "Data" contains a description of the data CHS_codebook.pdf, the results of our survey experiment CHS_data.rds and the classified topics CHS_topics.xlsx. 
 
 The survey experiment was conducted via the online-access panel *respondi* between December, 2020 and January, 2021. Variables are partially aggregated over questions to meet all data protection restrictions.
 
