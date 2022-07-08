@@ -1,6 +1,6 @@
 ## Overview
 
-This repository contains code and data of the project "Biased Preferences for Wealth Taxation: The Case of Misperceived Tax Burden Consequences" co-authored with Dr. Malte Chirvi (malte.chirvi@hu-berlin.de) and Dr. Cornelius Schneider (schneider@uni-mannheim.de).
+This repository contains data and code of the project "(Mathematical) Complexity and Preferences for Taxation: The Case of Wealth Taxation" co-authored with Dr. Malte Chirvi (malte.chirvi@hu-berlin.de) and Dr. Cornelius Schneider (schneider@uni-mannheim.de).
 
 ### Working Paper
 
