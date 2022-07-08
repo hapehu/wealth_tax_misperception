@@ -1,0 +1,876 @@
+---
+title: "CHS_analysis"
+author: "Chirvi M., Huber H.-P., Schneider C."
+date: "07 2022"
+output: html_document
+---
+
+### GENERAL SETTINGS
+
+# (1) set working directory
+```{r}
+
+setwd("~/Projekte/Wealth Tax Misperception")
+options(scipen = 999)
+
+```
+
+# (2) load all necessary libraries
+```{r}
+
+packages = c("quantreg", "ggplot2", "readr", 
+             "dplyr", "scales", "devtools", 
+             "gganimate", "gifski", "transformr",
+             "tidyverse","magick", "readxl", 
+             "ggpubr", "plm", "gplots", 
+             "tseries", "lmtest", "clubSandwich", 
+             "lme4", "apsrtable", "broom",
+             "haven", "weights", "stargazer", 
+             "sjPlot", "censReg", "reshape2")
+
+lapply(packages, require, character.only = TRUE)
+
+```
+
+
+### LOAD DATA
+
+```{r}
+
+# read survey data (provided in gibtub)
+data = readRDS("Data/CHS_data.rds")
+
+# read ALLBUS data (https://doi.org/10.4232/1.13250) (need to register to dwownload data at GESIS)
+allbus = read_dta("Data/ALLBUS_2018.dta")
+
+# read topic calssifications
+text = read_excel("Data/CHS_topics.xlsx")
+
+```
+
+### DATA PREPARATION
+
+# (1) define treatment group variable
+```{r}
+
+data$treat = ifelse(!is.na(data$taxallowance_y_c), 1,
+                    ifelse(!is.na(data$taxallowance_y_t), 2,
+                           ifelse(!is.na(data$taxallowance_o_c), 3,
+                                  ifelse(!is.na(data$taxallowance_o_t), 4, 0))))
+
+```
+
+# (2) define information/taxtaype treatment groups
+```{r}
+
+data$info = ifelse(data$treat == 2 | data$treat == 4, 1, 0)
+data$taxtype = ifelse(data$treat == 1 | data$treat == 2, 1, 0)
+
+```
+
+# (3) define control variables
+```{r}
+
+data$control = (data$controltax1 + data$controltax2 + data$controlgrowth)/3
+data$controltax = (data$controltax1 + data$controltax2)/2
+
+```
+
+# (4) define further variables
+```{r}
+
+data$children = ifelse(is.na(data$numberofchildren), NA,
+                       ifelse(data$numberofchildren > 1, 1, 0))
+
+data$employed = ifelse(is.na(data$employment), NA, 
+                       ifelse(data$employment == 1 | data$employment == 2 | data$employment == 3, 1, 0))
+
+data$university = ifelse(is.na(data$education), NA,
+                         ifelse(data$education > 4, 1, 0))
+
+data$married = ifelse(is.na(data$familystatus), NA,
+                      ifelse(data$familystatus == 2, 1, 0))
+
+data$highincome = ifelse(is.na(data$income), NA,
+                         ifelse(data$income > 3, 1, 0))
+
+data$leftparties = ifelse(is.na(data$party), NA,
+                          ifelse(data$party == 4 | data$party == 5 | data$party == 6, 1, 0))
+
+```
+
+# (5) calculating effective tax rates
+```{r}
+
+ev_notax1 = 350000
+ev_notax2 = 3000000
+ev_notax3 = 10800000
+
+data$taxrate1 = ifelse(!is.na(data$taxrate1_y_c), data$taxrate1_y_c/100,
+                    ifelse(!is.na(data$taxrate1_y_t), data$taxrate1_y_t/100,
+                           ifelse(!is.na(data$taxrate1_o_c), data$taxrate1_o_c/100,
+                                  ifelse(!is.na(data$taxrate1_o_t), data$taxrate1_o_t/100,NA))))
+
+data$taxrate2 = ifelse(!is.na(data$taxrate2_y_c), data$taxrate2_y_c/100,
+                    ifelse(!is.na(data$taxrate2_y_t), data$taxrate2_y_t/100,
+                           ifelse(!is.na(data$taxrate2_o_c), data$taxrate2_o_c/100,
+                                  ifelse(!is.na(data$taxrate2_o_t), data$taxrate2_o_t/100,NA))))
+
+data$taxrate3 = ifelse(!is.na(data$taxrate3_y_c), data$taxrate3_y_c/100,
+                    ifelse(!is.na(data$taxrate3_y_t), data$taxrate3_y_t/100,
+                           ifelse(!is.na(data$taxrate3_o_c), data$taxrate3_o_c/100,
+                                  ifelse(!is.na(data$taxrate3_o_t), data$taxrate3_o_t/100,NA))))
+
+data$taxallowance = ifelse(!is.na(data$taxallowance_y_c), data$taxallowance_y_c,
+                        ifelse(!is.na(data$taxallowance_y_t), data$taxallowance_y_t,
+                               ifelse(!is.na(data$taxallowance_o_c), data$taxallowance_o_c,
+                                      ifelse(!is.na(data$taxallowance_o_t), data$taxallowance_o_t,NA))))
+
+
+data$ev_ti1 = ifelse(data$treat == 3 | data$treat == 4, 
+                     ev_notax1 - pmax((ev_notax1 - data$taxallowance)*data$taxrate1,0), NA)
+
+data$ev_ti2 = ifelse(data$treat == 3 | data$treat == 4, 
+                     ev_notax2 - pmax((ev_notax2 - data$taxallowance)*data$taxrate2,0), NA)
+
+data$ev_ti3 = ifelse(data$treat == 3 | data$treat == 4, 
+                     ev_notax3 - pmax((ev_notax3 - data$taxallowance)*data$taxrate3,0), NA)
+
+
+wealth = function(basis, growthbase, growthrate, taxrate, allowance){
+  ev_ti = basis
+    for (i in 0:49)
+      ev_ti = (ev_ti + (growthrate*basis*(growthbase^(i))) - pmax(taxrate*((ev_ti + (growthrate*basis*(growthbase^(i)))) - allowance),0))
+    return(ev_ti)
+}
+
+data$ev_ti1 = ifelse(data$treat == 1 | data$treat == 2,
+                     wealth(130000, 1.02000545373, 0.02000545373, data$taxrate1, data$taxallowance)
+                     ,data$ev_ti1)
+
+data$ev_ti2 = ifelse(data$treat == 1 | data$treat == 2,
+                     wealth(1100000, 1.0202687185694, 0.0202687185694, data$taxrate2, data$taxallowance)
+                     ,data$ev_ti2)
+
+data$ev_ti3 = ifelse(data$treat == 1 | data$treat == 2,
+                     wealth(4000000, 1.0200636583136851, 0.0200636583136851, data$taxrate3, data$taxallowance)
+                     ,data$ev_ti3)
+
+data$tr_eff1 = 1 - data$ev_ti1/ev_notax1
+data$tr_eff2 = 1 - data$ev_ti2/ev_notax2
+data$tr_eff3 = 1 - data$ev_ti3/ev_notax3
+
+data$tr_eff1 = ifelse(data$taxrate1 == 0 | data$tr_eff1 < 0 | data$taxallowance >= 350000, 0, data$tr_eff1)
+data$tr_eff2 = ifelse(data$taxrate2 == 0 | data$tr_eff2 < 0 | data$taxallowance >= 3000000, 0, data$tr_eff2)
+data$tr_eff3 = ifelse(data$taxrate3 == 0 | data$tr_eff3 < 0 | data$taxallowance >= 10800000, 0, data$tr_eff3)
+
+data$tr_eff = (data$tr_eff1 + data$tr_eff2 + data$tr_eff3)/3
+
+```
+
+
+### DATA CLEANING (Table 1)
+
+```{r}
+
+# delete incomplete tax rates
+data = data %>%
+  filter(!is.na(data$taxrate1) & !is.na(data$taxrate2) & !is.na(data$taxrate3))
+
+# delete incoherent tax allowances
+data = data %>%
+  mutate(nonsense = ifelse(taxallowance %% 1000 == 0, 0, ifelse(taxallowance == 0, 0, ifelse(data$taxallowance > 10000, 0, 1)))) %>%
+  filter(nonsense == 0)
+
+```
+
+
+### CREATE PANEL DATA
+
+```{r}
+
+# create a panel (long) for all effective tax rates (etr)
+data_long_etr = gather(data, person, etr, tr_eff1:tr_eff3, factor_key = TRUE)
+
+# create a panel (long) for all tax rates (tr)
+data_long_tr = gather(data, person, tr, taxrate1:taxrate3, factor_key = TRUE)
+
+```
+
+
+### TREATMENT GROUPS
+
+# (1) summary statistics of main variables [Table 2]
+```{r}
+
+# Age
+tapply(data$age, data$treat, summary)
+
+# Female
+tapply(data$female, data$treat, summary)
+
+# Married
+tapply(data$married, data$treat, summary)
+
+# Income
+data %>%
+  select(treat, income) %>%
+  group_by(treat, income) %>%
+  dplyr::summarise(Frequency = n()) %>% 
+  mutate(Rel.Frequency = Frequency/sum(Frequency))
+
+# Children
+tapply(data$children, data$treat, summary)
+
+# University
+tapply(data$university, data$treat, summary)
+
+# Employed
+tapply(data$employed, data$treat, summary)
+
+```
+
+# (2) check whether sample is representative with respect to these variables [Table 2]
+```{r}
+
+# age
+allbus$age = ifelse(allbus$age == -32, NA, allbus$age)
+weighted.mean(allbus$age, allbus$wghtpew, na.rm = T)
+
+wtd.t.test(data[data$treat == 1,]$age, allbus$age, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$age, allbus$age, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$age, allbus$age, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$age, allbus$age, weighty = allbus$wghtpew)
+
+# female
+allbus$female = ifelse(allbus$sex == 2, 1, 0)
+weighted.mean(allbus$female, allbus$wghtpew)
+
+wtd.t.test(data[data$treat == 1,]$female, allbus$female, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$female, allbus$female, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$female, allbus$female, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$female, allbus$female, weighty = allbus$wghtpew)
+
+# married
+allbus$married = ifelse(allbus$mstat == 1 | allbus$mstat == 2, 1, 0)
+weighted.mean(allbus$married, allbus$wghtpew)
+
+wtd.t.test(data[data$treat == 1,]$married, allbus$married, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$married, allbus$married, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$married, allbus$married, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$married, allbus$married, weighty = allbus$wghtpew)
+
+# income
+allbus$income = ifelse(allbus$incc <= 0, NA,
+                        ifelse(allbus$incc <= 8, 1, 
+                               ifelse(allbus$incc <= 14, 2, 
+                                      ifelse(allbus$incc <= 18, 3,
+                                             ifelse(allbus$incc <= 19,4 ,
+                                                    ifelse(allbus$incc <= 20, 5, 6))))))
+
+weighted.mean(allbus$income == 1, allbus$wghtpew, na.rm = T)
+weighted.mean(allbus$income == 2, allbus$wghtpew, na.rm = T)
+weighted.mean(allbus$income == 3, allbus$wghtpew, na.rm = T)
+weighted.mean(allbus$income == 4, allbus$wghtpew, na.rm = T)
+weighted.mean(allbus$income == 5, allbus$wghtpew, na.rm = T)
+weighted.mean(allbus$income == 6, allbus$wghtpew, na.rm = T)
+
+wtd.t.test(data[data$treat == 1,]$income == 1, allbus$income == 1, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 1,]$income == 2, allbus$income == 2, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 1,]$income == 3, allbus$income == 3, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 1,]$income == 4, allbus$income == 4, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 1,]$income == 5, allbus$income == 5, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 1,]$income == 6, allbus$income == 6, weighty = allbus$wghtpew)
+
+wtd.t.test(data[data$treat == 2,]$income == 1, allbus$income == 1, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$income == 2, allbus$income == 2, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$income == 3, allbus$income == 3, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$income == 4, allbus$income == 4, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$income == 5, allbus$income == 5, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$income == 6, allbus$income == 6, weighty = allbus$wghtpew)
+
+wtd.t.test(data[data$treat == 3,]$income == 1, allbus$income == 1, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$income == 2, allbus$income == 2, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$income == 3, allbus$income == 3, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$income == 4, allbus$income == 4, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$income == 5, allbus$income == 5, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$income == 6, allbus$income == 6, weighty = allbus$wghtpew)
+
+wtd.t.test(data[data$treat == 4,]$income == 1, allbus$income == 1, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$income == 2, allbus$income == 2, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$income == 3, allbus$income == 3, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$income == 4, allbus$income == 4, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$income == 5, allbus$income == 5, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$income == 6, allbus$income == 6, weighty = allbus$wghtpew)
+
+# children
+allbus$children = ifelse(allbus$dk05 < 0 , NA, ifelse(allbus$dk05 == 3, 0, 1))
+weighted.mean(allbus$children, allbus$wghtpew, na.rm = T)
+
+wtd.t.test(data[data$treat == 1,]$children, allbus$children, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$children, allbus$children, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$children, allbus$children, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$children, allbus$children, weighty = allbus$wghtpew)
+
+# university
+allbus$university = ifelse(allbus$de15 < 0 , NA, ifelse(allbus$de15 == 1, 1, 0))
+weighted.mean(allbus$university, allbus$wghtpew, na.rm = T)
+
+wtd.t.test(data[data$treat == 1,]$university, allbus$university, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$university, allbus$university, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$university, allbus$university, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$university, allbus$university, weighty = allbus$wghtpew)
+
+# employed
+allbus$employed = ifelse(allbus$work == 4, 0, 1)
+weighted.mean(allbus$employed, allbus$wghtpew, na.rm = T)
+
+wtd.t.test(data[data$treat == 1,]$employed, allbus$employed, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 2,]$employed, allbus$employed, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 3,]$employed, allbus$employed, weighty = allbus$wghtpew)
+wtd.t.test(data[data$treat == 4,]$employed, allbus$employed, weighty = allbus$wghtpew)
+
+```
+
+# (3) randomization check [Table C3]
+````{r}
+
+data$yearly = ifelse(data$treat == 1, 1, 0)
+data$yearlyinfo = ifelse(data$treat == 2, 1, 0)
+data$onetime = ifelse(data$treat == 3, 1, 0)
+data$onetimeinfo = ifelse(data$treat == 4, 1, 0)
+
+age1 = lm(yearly ~ age, data = data)
+age2 = lm(yearlyinfo ~ age, data = data)
+age3 = lm(onetime ~ age, data = data)
+age4 = lm(onetimeinfo ~ age, data = data)
+summary(age1)
+summary(age2)
+summary(age3)
+summary(age4)
+
+female1 = lm(yearly ~ female, data = data)
+female2 = lm(yearlyinfo ~ female, data = data)
+female3 = lm(onetime ~ female, data = data)
+female4 = lm(onetimeinfo ~ female, data = data)
+summary(female1)
+summary(female2)
+summary(female3)
+summary(female4)
+
+married1 = lm(yearly ~ married, data = data)
+married2 = lm(yearlyinfo ~ married, data = data)
+married3 = lm(onetime ~ married, data = data)
+married4 = lm(onetimeinfo ~ married, data = data)
+summary(married1)
+summary(married2)
+summary(married3)
+summary(married4)
+
+children1 = lm(yearly ~ children, data = data)
+children2 = lm(yearlyinfo ~ children, data = data)
+children3 = lm(onetime ~ children, data = data)
+children4 = lm(onetimeinfo ~ children, data = data)
+summary(children1)
+summary(children2)
+summary(children3)
+summary(children4)
+
+university1 = lm(yearly ~ university, data = data)
+university2 = lm(yearlyinfo ~ university, data = data)
+university3 = lm(onetime ~ university, data = data)
+university4 = lm(onetimeinfo ~ university, data = data)
+summary(university1)
+summary(university2)
+summary(university3)
+summary(university4)
+
+employed1 = lm(yearly ~ employed, data = data)
+employed2 = lm(yearlyinfo ~ employed, data = data)
+employed3 = lm(onetime ~ employed, data = data)
+employed4 = lm(onetimeinfo ~ employed, data = data)
+summary(employed1)
+summary(employed2)
+summary(employed3)
+summary(employed4)
+
+income1 = lm(yearly ~ factor(income), data = data)
+income2 = lm(yearlyinfo ~ factor(income), data = data)
+income3 = lm(onetime ~ factor(income), data = data)
+income4 = lm(onetimeinfo ~ factor(income), data = data)
+
+summary(income1)
+summary(income2)
+summary(income3)
+summary(income4)
+
+coeftest(income1, vcov = vcovHC(income1, type="HC1"))
+coeftest(income2, vcov = vcovHC(income2, type="HC1"))
+coeftest(income3, vcov = vcovHC(income3, type="HC1"))
+coeftest(income4, vcov = vcovHC(income4, type="HC1"))
+
+f1 = lm(yearly ~ age + female + married + factor(income) + children + university + employed, data = data)
+f2 = lm(yearlyinfo ~ age + female + married + factor(income) + children + university + employed, data = data)
+f3 = lm(onetime ~ age + female + married + factor(income) + children + university + employed, data = data)
+f4 = lm(onetimeinfo ~ age + female + married + factor(income) + children + university + employed, data = data)
+
+summary(f1)
+summary(f2)
+summary(f3)
+summary(f4)
+
+```
+
+
+### REGRESSION ANALYSIS
+
+# (1) Summary Statistics [Table B2]
+```{r}
+
+data %>%
+  select(tr_eff, 
+         age, 
+         female, 
+         inheritancetax, 
+         futuretax, 
+         pasttax, 
+         leftparties, 
+         redistribute, 
+         inequality, 
+         children, 
+         university, 
+         highincome, 
+         employed, 
+         control) %>%
+  stargazer(as.data.frame(.), summary = TRUE, digits = 3, header = F)
+
+```
+
+
+# (2) Define Panel Data Frame
+```{r}
+
+# select relevant variables
+data_long = data_long_etr %>%
+  select(
+    id,
+    etr,
+    info,
+    taxtype,
+    person,
+    age,
+    female,
+    inheritancetax,
+    futuretax,
+    pasttax,
+    leftparties,
+    redistribute,
+    inequality,
+    children,
+    university,
+    highincome,
+    employed,
+    control
+  )
+
+
+# define pd dataframe
+data_long = pdata.frame(data_long, index = c("id", "person"))
+
+```
+
+# (3) Baseline Regression Analysis [Table 3/B4]
+```{r}
+
+# random effects model without controls
+random = plm(etr ~ info*taxtype 
+                  + person, 
+                  data = data_long, 
+                  model = "random")
+
+
+
+# random effects model with controls
+random_C = plm(etr ~ info*taxtype 
+                  + person
+                  + age
+                  + female
+                  + inheritancetax
+                  + futuretax
+                  + pasttax
+                  + leftparties
+                  + redistribute
+                  + inequality
+                  + children
+                  + university
+                  + highincome
+                  + employed
+                  + control, 
+                  data = data_long, 
+                  model = "random")
+
+# censored random effects model (tobit) without controls
+tobit = censReg(etr ~ info*taxtype  
+                  + person, 
+                  data = data_long, 
+                  method = "BHHH", 
+                  nGHQ = 32)
+
+# censored random effects model (tobit) with controls
+tobit_C = censReg(etr ~ info*taxtype  
+                  + person
+                  + age
+                  + female
+                  + inheritancetax
+                  + futuretax
+                  + pasttax
+                  + leftparties
+                  + redistribute
+                  + inequality
+                  + children
+                  + university
+                  + highincome
+                  + employed
+                  + control, 
+                  data = data_long, 
+                  method = "BHHH", 
+                  nGHQ = 32)
+
+# create latex table
+stargazer(random, random_C, tobit, tobit_C, header = F)
+
+```
+
+# (4) Heterogeneity Analysis [Table B5]
+```{r}
+
+# yearly wealth tax: random effects model with interactions
+random_yearly_inter = plm(etr ~ info 
+                  + person*info
+                  + age*info
+                  + female*info
+                  + inheritancetax*info
+                  + futuretax*info
+                  + pasttax*info
+                  + leftparties*info
+                  + redistribute*info
+                  + inequality*info
+                  + children*info
+                  + university*info
+                  + highincome*info
+                  + employed*info
+                  + control*info, 
+                  data = data_long[data_long$taxtype == 1,], 
+                  model = "random")
+
+
+# yearly wealth tax: censored random effects model (tobit) with interactions
+tobit_yearly_inter = censReg(etr ~ info  
+                  + person*info
+                  + age*info
+                  + female*info
+                  + inheritancetax*info
+                  + futuretax*info
+                  + pasttax*info
+                  + leftparties*info
+                  + redistribute*info
+                  + inequality*info
+                  + children*info
+                  + university*info
+                  + highincome*info
+                  + employed*info
+                  + control*info,  
+                  data = data_long[data_long$taxtype == 1,],  
+                  method = "BHHH", 
+                  nGHQ = 32)
+
+
+# create latex table
+stargazer(random_yearly_inter, tobit_yearly_inter, header = F)
+
+```
+
+# (5) Logitic Regression [Table 4/B6]
+```{r}
+
+# filter data set
+data_within = data %>%
+  filter(choice != 3) %>%
+  mutate(dummy_yearly = as.factor(ifelse(choice == 2, 1, 0))) %>%
+  mutate(taxamount = as.numeric(gsub("[[:punct:]]", "", total_within_o))/1000000) %>%
+  mutate(taxquartile = as.factor(ntile(total_within_o, 4))) 
+
+# logit model
+logit1 = glm(dummy_yearly ~ 
+                         + info
+                         + taxtype*info
+             ,family = binomial(link ='logit'),data = data_within)
+
+logit1_C = glm(dummy_yearly ~ 
+                         + info
+                         + taxtype*info
+                         + age 
+                         + female 
+                         + inheritancetax 
+                         + futuretax 
+                         + pasttax 
+                         + leftparties
+                         + redistribute 
+                         + inequality 
+                         + children 
+                         + university
+                         + highincome
+                         + control 
+                         + employed
+             ,family = binomial(link ='logit'),data = data_within)
+
+logit2 = glm(dummy_yearly ~ 
+                         + info
+                         + taxtype*info
+                         + taxamount
+             ,family = binomial(link ='logit'),data = data_within)
+
+logit2_C = glm(dummy_yearly ~ 
+                         + info
+                         + taxtype*info
+                         + taxamount
+                         + age 
+                         + female 
+                         + inheritancetax 
+                         + futuretax 
+                         + pasttax 
+                         + leftparties
+                         + redistribute 
+                         + inequality 
+                         + children 
+                         + university
+                         + highincome
+                         + control 
+                         + employed
+             ,family = binomial(link ='logit'),data = data_within)
+
+# create latex table
+stargazer(logit1, logit1_C, logit2, logit2_C , header = F)
+
+
+```
+
+### FIGURES
+
+# (1) Figure 3: Baseline Results 
+```{r}
+
+df = data %>% 
+  group_by(taxtype, info) %>% 
+  summarise(n = n(), mean = mean(tr_eff), sd = sd(tr_eff)) %>%
+  mutate(se=sd/sqrt(n))  %>%
+  mutate(ic=se * qt((1-0.05)/2 + .5, n-1))
+
+df$taxtype = ifelse(df$taxtype == 1, 0, 1)
+
+df$taxtype = as.factor(df$taxtype)
+levels(df$taxtype) = c("Yearly Wealth Tax","One-Time Wealth Tax")
+
+df$info = as.factor(df$info)
+levels(df$info) = c("Control","Treatment")
+
+avg = c("Ø Wealth Levels", "Ø Wealth Levels", "Ø Wealth Levels", "Ø Wealth Levels")
+df$avg = avg
+
+ggplot(df, aes(x = avg, mean ,fill = factor(info))) +
+  geom_bar(position = "dodge", stat = "summary", color = "black") +
+  geom_errorbar(aes(ymin=mean-ic, ymax=mean+ic), width=.2,
+                position=position_dodge(.9), size = 0.5) +
+  scale_y_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), 
+                     breaks = c(0,0.1,0.2,0.3,0.4,0.5,0.6), 
+                     limits = c(0,0.6)) +
+  facet_grid(.~taxtype) +
+  scale_fill_manual(name = "", values = c("#c1e7ff", "#004c6d")) +
+  ylab("Effective Tax Rate") +
+  xlab("") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+```
+
+# (2) Figure 4: Tax Allowance
+```{r}
+
+data_long_tr$taxtype = ifelse(data_long_tr$taxtype == 1, 0, 1)
+
+data_long_tr$taxtype = as.factor(data_long_tr$taxtype)
+levels(data_long_tr$taxtype) = c("Yearly Wealth Tax","One-Time Wealth Tax")
+
+data_long_tr$info = as.factor(data_long_tr$info)
+levels(data_long_tr$info) = c("Control","Treatment")
+
+ggplot(data_long_tr, aes(taxallowance, color = factor(info), fill = factor(info))) +
+geom_density(size = 1.5, alpha = 0.5, adjust = 1) +
+  facet_grid(. ~ taxtype) +
+  scale_color_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
+  scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "NA"), name = "") +
+  scale_x_continuous(labels=comma_format(prefix = "€"), limits = c(0, 1100000), breaks = c(0, 250000, 500000, 750000, 1000000)) +
+  xlab("Tax Allowance") +
+  ylab("Density") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+```
+
+# (4) Figure 5: Nominal Tax Rates
+```{r}
+
+#data_long_tr$taxtype = ifelse(data_long_tr$taxtype == 0, 1, 0)
+
+#data_long_tr$taxtype = as.factor(data_long_tr$taxtype)
+#levels(data_long_tr$taxtype) = c("Yearly Wealth Tax","One-Time Wealth Tax")
+
+#data_long_tr$info = as.factor(data_long_tr$info)
+#levels(data_long_tr$info) = c("Control","Treatment")
+
+data_long_tr$person = as.factor(data_long_tr$person)
+levels(data_long_tr$person) = c("€350,000", "€3,000,000", "€10,800,000")
+
+data_long_tr$taxallowance_log = log(data_long_tr$taxallowance)
+
+ggplot(data_long_tr, aes(tr, color = factor(info), fill = factor(info))) +
+geom_density(size = 1.5, alpha = 0.5, adjust = 1)+
+  facet_grid(person ~ taxtype, scales = "free") +
+  scale_color_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
+  scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "NA"), name = "") +
+  scale_x_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), limits = c(-0.01,1.01)) +
+  xlab("Nominal Tax Rates") +
+  ylab("Density") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+
+```
+
+# (5) Figure 6: Whithin Choice.
+```{r}
+
+df = data %>%
+  group_by(taxtype, info, choice) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n))
+
+df$taxtype = as.factor(df$taxtype)
+levels(df$taxtype) = c("One-Time Wealth Tax", "Yearly Wealth Tax")
+df$taxtype = factor(df$taxtype, levels = c("Yearly Wealth Tax","One-Time Wealth Tax"))
+
+df$info = as.factor(df$info)
+levels(df$info) = c("Control","Treatment")
+
+df$choice = as.factor(df$choice)
+levels(df$choice) = c("One-Time Wealth Tax","Yearly Wealth Tax", "No Preference")
+df$choice = factor(df$choice, levels = c("Yearly Wealth Tax", "One-Time Wealth Tax", "No Preference"))
+
+ggplot(df, aes(factor(info), freq, fill = factor(choice))) + 
+  geom_bar(position = "dodge", stat = "summary", color = "black") +
+  facet_grid(. ~ taxtype) +
+  scale_y_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), 
+                    breaks = c(0,0.25, 0.5, 0.75), 
+                    limits = c(0,0.8)) +
+  scale_x_discrete(label = c("Control", "Treatment")) +
+  scale_fill_manual(values = c("Yearly Wealth Tax" = "#004c6d", "One-Time Wealth Tax" = "#c1e7ff", "No Preference" = "#999999"), name = "") +
+  ylab("Share") +
+  xlab("") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+```
+
+# (6) Figure 6: Reasoning
+```{r}
+
+reasons = inner_join(data_within[,c("id", "choice")], text, by = "id")
+
+df = reasons %>% 
+  group_by(choice) %>%
+  summarise(t1 = mean(topic1),
+            t2 = mean(topic2),
+            t3 = mean(topic3),
+            t4 = mean(topic4),
+            t5 = mean(topic5),
+            t6 = mean(topic6),
+            t7 = mean(topic7),
+            t8 = mean(topic8),
+            t9 = mean(topic9),
+            t10 = mean(topic10),
+            t11 = mean(topic11),
+            t12 = mean(topic12),
+            tn = mean(topicnone)) %>%
+  select(-tn)
+
+meltdf = melt(df, id.vars = "choice")
+
+meltdf$choice = as.factor(meltdf$choice)
+levels(meltdf$choice) = c("One-Time Wealth Tax", "Yearly Wealth Tax")
+meltdf$choice = factor(meltdf$choice, levels = c("Yearly Wealth Tax", "One-Time Wealth Tax"))
+
+ggplot(meltdf, aes(x = reorder(variable, value), y= value, fill = factor(choice))) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  coord_flip() +
+  #facet_grid(. ~ choice, scales = "free") +
+  #scale_color_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
+  scale_fill_manual(values = c("Yearly Wealth Tax" = "#004c6d", "One-Time Wealth Tax" = "#c1e7ff"), name = "") +
+  scale_y_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), limits = c(0,0.4)) +
+  scale_x_discrete(labels = c(
+                              "Wealth taxes generally rejected",
+                              "Tax burden equivalent",
+                              "Taxes restrict economy",
+                              "Early demise is possible",
+                              "Fairer taxation",
+                              "Prevention of tax avoidance",
+                              "One big payment is less effort",                              
+                              "Assets could decrease unexpectedly",
+                              "Similar to inheritance tax/heirs are burdened",
+                              "Financial freedom during life",
+                              "Smaller amounts easier to manage",
+                              "Continuous and predictable tax revenue")) +
+  xlab("Reasons") +
+  ylab("Share") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+
+```
+
+# (5) Figure C1: Round Number Bias
+```{r}
+
+data_long_tr$taxtype = ifelse(data_long_tr$taxtype == 0, 1, 0)
+
+data_long_tr$taxtype = as.factor(data_long_tr$taxtype)
+levels(data_long_tr$taxtype) = c("Yearly Wealth Tax","One-Time Wealth Tax")
+
+data_long_tr$info = as.factor(data_long_tr$info)
+levels(data_long_tr$info) = c("Control","Treatment")
+
+data_long_tr$person = as.factor(data_long_tr$person)
+levels(data_long_tr$person) = c("€350,000", "€3,000,000", "€10,800,000")
+
+ggplot(data_long_tr[data_long_tr$tr <= 0.03 & data_long_tr$taxtype == "Yearly Wealth Tax",], aes(x = tr, fill = factor(info))) +
+geom_bar(aes(y=..count..), stat = "bin", binwidth = 0.001,  position = "dodge", color = "black") + 
+scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
+scale_x_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%"))) +
+xlab("Nominal Tax Rates") +
+ylab("Count") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+
+```
