@@ -18,15 +18,12 @@ options(scipen = 999)
 # (2) load all necessary libraries
 ```{r}
 
-packages = c("quantreg", "ggplot2", "readr", 
-             "dplyr", "scales", "devtools", 
-             "gganimate", "gifski", "transformr",
-             "tidyverse","magick", "readxl", 
-             "ggpubr", "plm", "gplots", 
-             "tseries", "lmtest", "clubSandwich", 
-             "lme4", "apsrtable", "broom",
-             "haven", "weights", "stargazer", 
-             "sjPlot", "censReg", "reshape2", "AER")
+packages = c("ggplot2", "readr", "dplyr", 
+             "scales", "devtools", "tidyverse", 
+             "readxl", "ggpubr", "plm",
+             "gplots", "lmtest", "clubSandwich", 
+             "stargazer","sjPlot", "censReg", 
+             "reshape2")
 
 lapply(packages, require, character.only = TRUE)
 
