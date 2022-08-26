@@ -26,7 +26,7 @@ packages = c("quantreg", "ggplot2", "readr",
              "tseries", "lmtest", "clubSandwich", 
              "lme4", "apsrtable", "broom",
              "haven", "weights", "stargazer", 
-             "sjPlot", "censReg", "reshape2")
+             "sjPlot", "censReg", "reshape2", "AER")
 
 lapply(packages, require, character.only = TRUE)
 
@@ -40,7 +40,7 @@ lapply(packages, require, character.only = TRUE)
 # read survey data (provided in gibtub)
 data = readRDS("Data/CHS_data.rds")
 
-# read ALLBUS data (https://doi.org/10.4232/1.13250) (need to register to dwownload data at GESIS)
+# read ALLBUS data (https://doi.org/10.4232/1.13250) (need to register to download data at GESIS)
 allbus = read_dta("Data/ALLBUS_2018.dta")
 
 # read topic calssifications
@@ -421,7 +421,6 @@ summary(f4)
 
 ```
 
-
 ### REGRESSION ANALYSIS
 
 # (1) Summary Statistics [Table B2]
@@ -473,8 +472,7 @@ data_long = data_long_etr %>%
     control
   )
 
-
-# define pd dataframe
+# define pdata.frame
 data_long = pdata.frame(data_long, index = c("id", "person"))
 
 ```
@@ -488,7 +486,8 @@ random = plm(etr ~ info*taxtype
                   data = data_long, 
                   model = "random")
 
-
+random_se   = vcovCR(random, type = "CR1")
+random_se = sqrt(diag(random_se))
 
 # random effects model with controls
 random_C = plm(etr ~ info*taxtype 
@@ -508,6 +507,9 @@ random_C = plm(etr ~ info*taxtype
                   + control, 
                   data = data_long, 
                   model = "random")
+
+random_C_se   = vcovCR(random_C, type = "CR1")
+random_C_se   = sqrt(diag(random_C_se))
 
 # censored random effects model (tobit) without controls
 tobit = censReg(etr ~ info*taxtype  
@@ -537,7 +539,9 @@ tobit_C = censReg(etr ~ info*taxtype
                   nGHQ = 32)
 
 # create latex table
-stargazer(random, random_C, tobit, tobit_C, header = F)
+stargazer(random, random_C, tobit, tobit_C, 
+          se = list(random_se, random_C_se, NULL, NULL), 
+          header = F)
 
 ```
 
@@ -563,6 +567,8 @@ random_yearly_inter = plm(etr ~ info
                   data = data_long[data_long$taxtype == 1,], 
                   model = "random")
 
+random_yearly_inter_se   = vcovCR(random_yearly_inter, type = "CR1")
+random_yearly_inter_se   = sqrt(diag(random_yearly_inter_se))
 
 # yearly wealth tax: censored random effects model (tobit) with interactions
 tobit_yearly_inter = censReg(etr ~ info  
@@ -586,11 +592,13 @@ tobit_yearly_inter = censReg(etr ~ info
 
 
 # create latex table
-stargazer(random_yearly_inter, tobit_yearly_inter, header = F)
+stargazer(random_yearly_inter, tobit_yearly_inter, 
+          se = list(random_yearly_inter_se, NULL),
+          header = F)
 
 ```
 
-# (5) Logitic Regression [Table 4/B6]
+# (5) Logistic Regression [Table 4/B6]
 ```{r}
 
 # filter data set
@@ -706,12 +714,16 @@ levels(data_long_tr$taxtype) = c("Yearly Wealth Tax","One-Time Wealth Tax")
 data_long_tr$info = as.factor(data_long_tr$info)
 levels(data_long_tr$info) = c("Control","Treatment")
 
-ggplot(data_long_tr, aes(taxallowance, color = factor(info), fill = factor(info))) +
+data_long_tr$taxallowance_k = data_long_tr$taxallowance/1000
+
+ggplot(data_long_tr, aes(taxallowance_k, color = factor(info), fill = factor(info))) +
 geom_density(size = 1.5, alpha = 0.5, adjust = 1) +
   facet_grid(. ~ taxtype) +
   scale_color_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
   scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "NA"), name = "") +
-  scale_x_continuous(labels=comma_format(prefix = "€"), limits = c(0, 1100000), breaks = c(0, 250000, 500000, 750000, 1000000)) +
+  scale_x_continuous(labels = comma_format(prefix = "€", suffix = "k"), 
+                     limits = c(-100, 1100), 
+                     breaks = c(0, 250, 500, 750, 1000)) +
   xlab("Tax Allowance") +
   ylab("Density") +
   theme_bw(base_size = 28) +
@@ -742,7 +754,8 @@ geom_density(size = 1.5, alpha = 0.5, adjust = 1)+
   facet_grid(person ~ taxtype, scales = "free") +
   scale_color_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
   scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "NA"), name = "") +
-  scale_x_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), limits = c(-0.01,1.01)) +
+  scale_x_continuous(labels = function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), 
+                     limits = c(-0.01,1.01)) +
   xlab("Nominal Tax Rates") +
   ylab("Density") +
   theme_bw(base_size = 28) +
@@ -775,7 +788,7 @@ df$choice = factor(df$choice, levels = c("Yearly Wealth Tax", "One-Time Wealth T
 ggplot(df, aes(factor(info), freq, fill = factor(choice))) + 
   geom_bar(position = "dodge", stat = "summary", color = "black") +
   facet_grid(. ~ taxtype) +
-  scale_y_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), 
+  scale_y_continuous(labels = function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), 
                     breaks = c(0,0.25, 0.5, 0.75), 
                     limits = c(0,0.8)) +
   scale_x_discrete(label = c("Control", "Treatment")) +
@@ -820,12 +833,9 @@ meltdf$choice = factor(meltdf$choice, levels = c("Yearly Wealth Tax", "One-Time 
 ggplot(meltdf, aes(x = reorder(variable, value), y= value, fill = factor(choice))) +
   geom_bar(stat = "identity", position = "dodge", color = "black") +
   coord_flip() +
-  #facet_grid(. ~ choice, scales = "free") +
-  #scale_color_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
   scale_fill_manual(values = c("Yearly Wealth Tax" = "#004c6d", "One-Time Wealth Tax" = "#c1e7ff"), name = "") +
   scale_y_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), limits = c(0,0.4)) +
-  scale_x_discrete(labels = c(
-                              "Wealth taxes generally rejected",
+  scale_x_discrete(labels = c("Wealth taxes generally rejected",
                               "Tax burden equivalent",
                               "Taxes restrict economy",
                               "Early demise is possible",
@@ -861,12 +871,13 @@ levels(data_long_tr$info) = c("Control","Treatment")
 data_long_tr$person = as.factor(data_long_tr$person)
 levels(data_long_tr$person) = c("€350,000", "€3,000,000", "€10,800,000")
 
-ggplot(data_long_tr[data_long_tr$tr <= 0.03 & data_long_tr$taxtype == "Yearly Wealth Tax",], aes(x = tr, fill = factor(info))) +
-geom_bar(aes(y=..count..), stat = "bin", binwidth = 0.001,  position = "dodge", color = "black") + 
-scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
-scale_x_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%"))) +
-xlab("Nominal Tax Rates") +
-ylab("Count") +
+ggplot(data_long_tr[data_long_tr$tr <= 0.03 & data_long_tr$taxtype == "Yearly Wealth Tax",], 
+       aes(x = tr, fill = factor(info))) +
+  geom_bar(aes(y=..count..), stat = "bin", binwidth = 0.001,  position = "dodge", color = "black") + 
+  scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
+  scale_x_continuous(labels = function(x) format(scales::percent(x, accuracy = 1, suffix ="%"))) +
+  xlab("Nominal Tax Rates") +
+  ylab("Count") +
   theme_bw(base_size = 28) +
   theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
                                   size=0.5, linetype="solid", 
