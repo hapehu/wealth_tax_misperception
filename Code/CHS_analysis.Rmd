@@ -1,7 +1,7 @@
 ---
 title: "CHS_analysis"
 author: "Chirvi M., Huber H.-P., Schneider C."
-date: "07 2022"
+date: "09 2022"
 output: html_document
 ---
 
@@ -23,7 +23,7 @@ packages = c("ggplot2", "readr", "dplyr",
              "readxl", "ggpubr", "plm",
              "gplots", "lmtest", "clubSandwich", 
              "stargazer","sjPlot", "censReg", 
-             "reshape2")
+             "reshape2", "haven")
 
 lapply(packages, require, character.only = TRUE)
 
@@ -602,8 +602,7 @@ stargazer(random_yearly_inter, tobit_yearly_inter,
 data_within = data %>%
   filter(choice != 3) %>%
   mutate(dummy_yearly = as.factor(ifelse(choice == 2, 1, 0))) %>%
-  mutate(taxamount = as.numeric(gsub("[[:punct:]]", "", total_within_o))/1000000) %>%
-  mutate(taxquartile = as.factor(ntile(total_within_o, 4))) 
+  mutate(taxamount = as.numeric(gsub("[[:punct:]]", "", total_within_o))/1000000)
 
 # logit model
 logit1 = glm(dummy_yearly ~ 
@@ -733,14 +732,6 @@ geom_density(size = 1.5, alpha = 0.5, adjust = 1) +
 # (4) Figure 5: Nominal Tax Rates
 ```{r}
 
-#data_long_tr$taxtype = ifelse(data_long_tr$taxtype == 0, 1, 0)
-
-#data_long_tr$taxtype = as.factor(data_long_tr$taxtype)
-#levels(data_long_tr$taxtype) = c("Yearly Wealth Tax","One-Time Wealth Tax")
-
-#data_long_tr$info = as.factor(data_long_tr$info)
-#levels(data_long_tr$info) = c("Control","Treatment")
-
 data_long_tr$person = as.factor(data_long_tr$person)
 levels(data_long_tr$person) = c("€350,000", "€3,000,000", "€10,800,000")
 
@@ -776,7 +767,7 @@ levels(df$taxtype) = c("One-Time Wealth Tax", "Yearly Wealth Tax")
 df$taxtype = factor(df$taxtype, levels = c("Yearly Wealth Tax","One-Time Wealth Tax"))
 
 df$info = as.factor(df$info)
-levels(df$info) = c("Control","Treatment")
+levels(df$info) = c("Control", "Treatment")
 
 df$choice = as.factor(df$choice)
 levels(df$choice) = c("One-Time Wealth Tax","Yearly Wealth Tax", "No Preference")
@@ -857,17 +848,6 @@ ggplot(meltdf, aes(x = reorder(variable, value), y= value, fill = factor(choice)
 # (5) Figure C1: Round Number Bias
 ```{r}
 
-data_long_tr$taxtype = ifelse(data_long_tr$taxtype == 0, 1, 0)
-
-data_long_tr$taxtype = as.factor(data_long_tr$taxtype)
-levels(data_long_tr$taxtype) = c("Yearly Wealth Tax","One-Time Wealth Tax")
-
-data_long_tr$info = as.factor(data_long_tr$info)
-levels(data_long_tr$info) = c("Control","Treatment")
-
-data_long_tr$person = as.factor(data_long_tr$person)
-levels(data_long_tr$person) = c("€350,000", "€3,000,000", "€10,800,000")
-
 ggplot(data_long_tr[data_long_tr$tr <= 0.03 & data_long_tr$taxtype == "Yearly Wealth Tax",], 
        aes(x = tr, fill = factor(info))) +
   geom_bar(aes(y=..count..), stat = "bin", binwidth = 0.001,  position = "dodge", color = "black") + 
@@ -880,5 +860,81 @@ ggplot(data_long_tr[data_long_tr$tr <= 0.03 & data_long_tr$taxtype == "Yearly We
                                   size=0.5, linetype="solid", 
                                   colour ="black"))
 
+
+```
+
+# (6) Figure C2: Preferences for Progressive Wealth Taxation
+```{r}
+
+df = data_long_etr %>%
+  group_by(person, taxtype, info) %>% 
+  summarise(n = n(), mean = mean(etr), sd = sd(etr)) %>%
+  mutate(se=sd/sqrt(n))  %>%
+  mutate(ic=se * qt((1-0.05)/2 + .5, n-1))
+
+df$taxtype = as.factor(df$taxtype)
+levels(df$taxtype) = c("One-Time Wealth Tax", "Yearly Wealth Tax")
+df$taxtype = factor(df$taxtype, levels = c("Yearly Wealth Tax","One-Time Wealth Tax"))
+
+df$info = as.factor(df$info)
+levels(df$info) = c("Control","Treatment")
+
+ggplot(df, aes(factor(person), mean, fill = factor(info))) + 
+  geom_bar(position = "dodge", stat = "summary", color = "black") +
+  geom_errorbar(aes(ymin=mean-ic, ymax=mean+ic), width=.2,
+                position=position_dodge(.9), size = 1) +
+  facet_grid(. ~ taxtype) +
+  scale_y_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), 
+                     breaks = c(0,0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7), 
+                     limits = c(0,0.75)) +
+  scale_x_discrete(label = c("€350,000", "€3,000,000", "€10,800,000")) +
+  scale_fill_manual(values = c("Control" = "#c1e7ff", "Treatment" = "#004c6d"), name = "") +
+  scale_alpha_manual(values = c("Control" = 0.5, "Treatment" = 1), name = "") +
+  ylab("Effective Tax Rate") +
+  xlab("") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+```
+
+# (7) Figure C3: Redistributive Preferences
+```{r}
+
+df = data_long_etr %>%
+  filter(!is.na(data_long_etr$redistribute)) %>%
+  mutate(index = ifelse(redistribute > median(redistribute), 1, 0)) %>%
+  group_by(taxtype, index, info) %>% 
+  summarise(n = n(), mean = mean(etr), sd = sd(etr)) %>%
+  mutate(se=sd/sqrt(n))  %>%
+  mutate(ic=se * qt((1-0.05)/2 + .5, n-1))
+
+df$taxtype = as.factor(df$taxtype)
+levels(df$taxtype) = c("One-Time Wealth Tax", "Yearly Wealth Tax")
+df$taxtype = factor(df$taxtype, levels = c("Yearly Wealth Tax","One-Time Wealth Tax"))
+
+df$info = as.factor(df$info)
+levels(df$info) = c("Control","Treatment")
+
+df$index = as.factor(df$index)
+levels(df$index) = c("Low Redistributive Preferences","High Redistributive Preferences")
+
+ggplot(df, aes(info, mean, fill = index)) + 
+  geom_bar(position = "dodge", stat = "summary", color = "black") +
+  geom_errorbar(aes(ymin=mean-ic, ymax=mean+ic), width=.2,
+                position=position_dodge(.9), size = 1) +
+  facet_grid(. ~ taxtype) +
+  scale_y_continuous(labels=function(x) format(scales::percent(x, accuracy = 1, suffix ="%")), 
+                     breaks = c(0,0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.6, 0.7), 
+                     limits = c(0,0.7)) +
+  #scale_x_discrete(label = c("Dummies", "Smarties")) +
+  scale_fill_manual(values = c("Low Redistributive Preferences" = "#c1e7ff", "High Redistributive Preferences" = "#004c6d"), name = "") +
+  ylab("Effective Tax Rate") +
+  xlab("") +
+  theme_bw(base_size = 28) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill=NA,
+                                  size=0.5, linetype="solid", 
+                                  colour ="black"))
 
 ```
